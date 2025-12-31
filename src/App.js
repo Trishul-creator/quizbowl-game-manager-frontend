@@ -64,17 +64,19 @@ function App() {
     try {
       setLoadingGame(true);
       const res = await api.get("/api/game", { params: { gameId } });
-      setGame(res.data);
-      if (!editingNames) {
-        setTeamAInput(res.data.teamAName);
-        setTeamBInput(res.data.teamBName);
+      if (isAdmin || !game) {
+        setGame(res.data);
+        if (!editingNames) {
+          setTeamAInput(res.data.teamAName);
+          setTeamBInput(res.data.teamBName);
+        }
       }
     } catch (err) {
       // no-op for now
     } finally {
       setLoadingGame(false);
     }
-  }, [editingNames, gameId]);
+  }, [editingNames, gameId, isAdmin, game]);
 
   const fetchBracket = useCallback(async () => {
     try {
@@ -162,16 +164,15 @@ function App() {
       return;
     }
     setGame((g) => {
-      const base =
-        g || {
-          teamAName: teamAInput || "Team A",
-          teamBName: teamBInput || "Team B",
-          teamAScore: 0,
-          teamBScore: 0,
-          questionNumber: 1,
-          lastTossupWinner: null,
-          history: [],
-        };
+      const base = g || {
+        teamAName: teamAInput || "Team A",
+        teamBName: teamBInput || "Team B",
+        teamAScore: 0,
+        teamBScore: 0,
+        questionNumber: 1,
+        lastTossupWinner: null,
+        history: [],
+      };
       const next = { ...base, history: [...(base.history || [])] };
       if (team === "A") {
         next.teamAScore = (next.teamAScore || 0) + 10;
