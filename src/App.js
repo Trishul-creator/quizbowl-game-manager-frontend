@@ -162,8 +162,17 @@ function App() {
       return;
     }
     setGame((g) => {
-      if (!g) return g;
-      const next = { ...g, history: [...(g.history || [])] };
+      const base =
+        g || {
+          teamAName: teamAInput || "Team A",
+          teamBName: teamBInput || "Team B",
+          teamAScore: 0,
+          teamBScore: 0,
+          questionNumber: 1,
+          lastTossupWinner: null,
+          history: [],
+        };
+      const next = { ...base, history: [...(base.history || [])] };
       if (team === "A") {
         next.teamAScore = (next.teamAScore || 0) + 10;
         next.lastTossupWinner = "A";
