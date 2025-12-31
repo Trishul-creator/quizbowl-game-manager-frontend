@@ -97,10 +97,29 @@ function App() {
   }, [fetchGame, fetchBracket, gameId]);
 
   useInterval(() => {
-    fetchGame();
-    fetchBracket();
-  }, 1200);
-  //Random Change for fun.
+    if (isAdmin) {
+      fetchGame();
+      fetchBracket();
+    }
+  }, isAdmin ? 1200 : 5000);
+
+  useEffect(() => {
+    const source = new EventSource("https://api.quizbowl.game-manager.org/api/bracket/stream");
+    source.addEventListener("bracket", (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        setBracket(data);
+      } catch (err) {
+        // ignore parse errors
+      }
+    });
+    source.onerror = () => {
+      source.close();
+    };
+    return () => {
+      source.close();
+    };
+  }, []);
 
   useInterval(() => {
     setTimerSeconds((prev) => {
