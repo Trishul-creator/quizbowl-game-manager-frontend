@@ -97,6 +97,7 @@ function App() {
     fetchGame();
     fetchBracket();
   }, 1200);
+  //Random Change for fun.
 
   useInterval(() => {
     setTimerSeconds((prev) => {
