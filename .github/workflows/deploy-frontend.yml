@@ -1,0 +1,53 @@
+name: Deploy Frontend (S3 + CloudFront)
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build React app
+        env:
+          REACT_APP_API_BASE_URL: ${{ secrets.REACT_APP_API_BASE_URL }}
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Sync build output into s3://bucket/build (prefix)
+      - name: Upload build to S3
+        run: |
+          aws s3 sync build "s3://${{ secrets.S3_BUCKET_NAME }}/${{ secrets.S3_DEPLOY_PREFIX }}" --delete
+
+      # Make sure index.html is not cached too aggressively (prevents “old app” sticking around)
+      - name: Set no-cache for index.html
+        run: |
+          aws s3 cp build/index.html "s3://${{ secrets.S3_BUCKET_NAME }}/${{ secrets.S3_DEPLOY_PREFIX }}/index.html" \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --content-type "text/html" \
+            --metadata-directive REPLACE
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --paths "/*"
