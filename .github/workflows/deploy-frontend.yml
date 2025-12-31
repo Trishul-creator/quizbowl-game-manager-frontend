@@ -33,15 +33,15 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # Sync build output into s3://bucket/build (prefix)
-      - name: Upload build to S3
+      # Upload the CONTENTS of build/ to bucket root (IMPORTANT: trailing slash on build/)
+      - name: Upload build to S3 (bucket root)
         run: |
-          aws s3 sync build "s3://${{ secrets.S3_BUCKET_NAME }}/${{ secrets.S3_DEPLOY_PREFIX }}" --delete
+          aws s3 sync build/ "s3://${{ secrets.S3_BUCKET_NAME }}/" --delete
 
-      # Make sure index.html is not cached too aggressively (prevents “old app” sticking around)
+      # Force index.html to be no-cache so new bundles load immediately
       - name: Set no-cache for index.html
         run: |
-          aws s3 cp build/index.html "s3://${{ secrets.S3_BUCKET_NAME }}/${{ secrets.S3_DEPLOY_PREFIX }}/index.html" \
+          aws s3 cp build/index.html "s3://${{ secrets.S3_BUCKET_NAME }}/index.html" \
             --cache-control "no-cache, no-store, must-revalidate" \
             --content-type "text/html" \
             --metadata-directive REPLACE
