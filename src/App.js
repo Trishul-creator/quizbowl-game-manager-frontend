@@ -93,12 +93,6 @@ function App() {
     fetchBracket();
   }, [fetchGame, fetchBracket, gameId]);
 
-  useEffect(() => {
-    if (authRole !== "ADMIN") {
-      setPage("bracket");
-    }
-  }, [authRole]);
-
   useInterval(() => {
     fetchGame();
     fetchBracket();
@@ -157,6 +151,7 @@ function App() {
   };
 
   const awardTossup = async (team) => {
+    if (!isAdmin) return;
     await api.post("/api/game/award-tossup", { team }, { params: { gameId }, headers: adminHeaders() });
     if (correctRef.current) {
       correctRef.current.currentTime = 0;
@@ -166,6 +161,7 @@ function App() {
   };
 
   const awardBonus = async () => {
+    if (!isAdmin) return;
     await api.post("/api/game/award-bonus", { points: 10 }, { params: { gameId }, headers: adminHeaders() });
     if (bonusRef.current) {
       bonusRef.current.currentTime = 0;
@@ -175,6 +171,12 @@ function App() {
   };
 
   const handleNextTossup = async () => {
+    if (!isAdmin) {
+      setTimerMode("tossup");
+      setTimerSeconds(7);
+      setTimerRunning(false);
+      return;
+    }
     await api.post("/api/game/next-tossup", null, { params: { gameId }, headers: adminHeaders() });
     setTimerMode("tossup");
     setTimerSeconds(7);
@@ -184,6 +186,13 @@ function App() {
 
   const handleResetGame = async () => {
     try {
+      if (!isAdmin) {
+        setTimerMode("tossup");
+        setTimerSeconds(7);
+        setTimerRunning(false);
+        setAuthError("");
+        return;
+      }
       await api.post("/api/game/reset", null, { params: { gameId }, headers: adminHeaders() });
       await api.post("/api/bracket/reset", null, { headers: adminHeaders() });
       setTimerMode("tossup");
@@ -203,14 +212,20 @@ function App() {
   };
 
   const handleSaveNames = async () => {
-    await api.post(
-      "/api/game/team-names",
-      {
+    if (!isAdmin) {
+      // local-only change for viewers
+      setGame((g) => ({
+        ...(g || {}),
         teamAName: teamAInput,
         teamBName: teamBInput,
-      },
-      { params: { gameId }, headers: adminHeaders() }
-    );
+      }));
+      setEditingNames(false);
+      return;
+    }
+    await api.post("/api/game/team-names", {
+      teamAName: teamAInput,
+      teamBName: teamBInput,
+    }, { params: { gameId }, headers: adminHeaders() });
     setEditingNames(false);
     fetchGame();
   };
@@ -518,14 +533,12 @@ function App() {
             </button>
           </div>
           <div className="tabs">
-            {isAdmin && (
-              <button
-                className={`tab ${page === "control" ? "active" : ""}`}
-                onClick={() => setPage("control")}
-              >
-                Control
-              </button>
-            )}
+            <button
+              className={`tab ${page === "control" ? "active" : ""}`}
+              onClick={() => setPage("control")}
+            >
+              Control
+            </button>
             <button
               className={`tab ${page === "bracket" ? "active" : ""}`}
               onClick={() => setPage("bracket")}
@@ -536,7 +549,7 @@ function App() {
         </div>
       </header>
 
-      {page === "control" && isAdmin && (
+      {page === "control" && (
         <>
           <div className="control-layout">
             <div className="card timer-card">
@@ -603,14 +616,13 @@ function App() {
                     <button
                       className="btn primary"
                       onClick={() => startTimerWithMode(timerMode)}
-                      disabled={!isAdmin}
                     >
                       Start
                     </button>
-                    <button className="btn ghost" onClick={pauseTimer} disabled={!isAdmin}>
+                    <button className="btn ghost" onClick={pauseTimer}>
                       Pause
                     </button>
-                    <button className="btn ghost" onClick={resetTimer} disabled={!isAdmin}>
+                    <button className="btn ghost" onClick={resetTimer}>
                       Reset
                     </button>
                   </div>
