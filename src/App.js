@@ -59,6 +59,7 @@ function App() {
   const timerEndRef = useRef(null);
 
   const adminHeaders = () => (authToken ? { "X-Admin-Token": authToken } : {});
+  const isAdmin = authRole === "ADMIN";
 
   const fetchGame = useCallback(async () => {
     try {
@@ -536,8 +537,6 @@ function App() {
   };
 
   const viewerNextMatch = nextMatchForTeam(playerTeamId);
-
-  const isAdmin = authRole === "ADMIN";
 
   if (!authToken) {
     return (
