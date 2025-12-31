@@ -152,27 +152,94 @@ function App() {
   };
 
   const awardTossup = async (team) => {
-    if (!isAdmin) return;
-    await api.post("/api/game/award-tossup", { team }, { params: { gameId }, headers: adminHeaders() });
+    if (isAdmin) {
+      await api.post("/api/game/award-tossup", { team }, { params: { gameId }, headers: adminHeaders() });
+      if (correctRef.current) {
+        correctRef.current.currentTime = 0;
+        correctRef.current.play();
+      }
+      fetchGame();
+      return;
+    }
+    setGame((g) => {
+      if (!g) return g;
+      const next = { ...g, history: [...(g.history || [])] };
+      if (team === "A") {
+        next.teamAScore = (next.teamAScore || 0) + 10;
+        next.lastTossupWinner = "A";
+        next.history.push({
+          type: "TOSSUP",
+          description: `Tossup +10 → ${next.teamAName || "Team A"}`,
+          timestamp: Date.now(),
+          team: "A",
+          points: 10,
+        });
+      } else if (team === "B") {
+        next.teamBScore = (next.teamBScore || 0) + 10;
+        next.lastTossupWinner = "B";
+        next.history.push({
+          type: "TOSSUP",
+          description: `Tossup +10 → ${next.teamBName || "Team B"}`,
+          timestamp: Date.now(),
+          team: "B",
+          points: 10,
+        });
+      }
+      return next;
+    });
     if (correctRef.current) {
       correctRef.current.currentTime = 0;
       correctRef.current.play();
     }
-    fetchGame();
   };
 
   const awardBonus = async () => {
-    if (!isAdmin) return;
-    await api.post("/api/game/award-bonus", { points: 10 }, { params: { gameId }, headers: adminHeaders() });
+    if (isAdmin) {
+      await api.post("/api/game/award-bonus", { points: 10 }, { params: { gameId }, headers: adminHeaders() });
+      if (bonusRef.current) {
+        bonusRef.current.currentTime = 0;
+        bonusRef.current.play();
+      }
+      fetchGame();
+      return;
+    }
+    setGame((g) => {
+      if (!g || !g.lastTossupWinner) return g;
+      const next = { ...g, history: [...(g.history || [])] };
+      if (g.lastTossupWinner === "A") {
+        next.teamAScore = (next.teamAScore || 0) + 10;
+        next.history.push({
+          type: "BONUS",
+          description: `Bonus +10 → ${next.teamAName || "Team A"}`,
+          timestamp: Date.now(),
+          team: "A",
+          points: 10,
+        });
+      } else if (g.lastTossupWinner === "B") {
+        next.teamBScore = (next.teamBScore || 0) + 10;
+        next.history.push({
+          type: "BONUS",
+          description: `Bonus +10 → ${next.teamBName || "Team B"}`,
+          timestamp: Date.now(),
+          team: "B",
+          points: 10,
+        });
+      }
+      return next;
+    });
     if (bonusRef.current) {
       bonusRef.current.currentTime = 0;
       bonusRef.current.play();
     }
-    fetchGame();
   };
 
   const handleNextTossup = async () => {
     if (!isAdmin) {
+      setGame((g) =>
+        g
+          ? { ...g, questionNumber: (g.questionNumber || 1) + 1, lastTossupWinner: null }
+          : g
+      );
       setTimerMode("tossup");
       setTimerSeconds(7);
       setTimerRunning(false);
@@ -188,6 +255,15 @@ function App() {
   const handleResetGame = async () => {
     try {
       if (!isAdmin) {
+        setGame({
+          teamAName: "Team A",
+          teamBName: "Team B",
+          teamAScore: 0,
+          teamBScore: 0,
+          questionNumber: 1,
+          lastTossupWinner: null,
+          history: [],
+        });
         setTimerMode("tossup");
         setTimerSeconds(7);
         setTimerRunning(false);
@@ -659,10 +735,10 @@ function App() {
                   <div className="question-label">Question</div>
                   <div className="question-number">#{game?.questionNumber ?? 1}</div>
                   <div className="center-actions">
-                    <button className="btn primary" onClick={handleNextTossup} disabled={!isAdmin}>
+                    <button className="btn primary" onClick={handleNextTossup}>
                       Next tossup
                     </button>
-                    <button className="btn ghost" onClick={handleResetGame} disabled={!isAdmin}>
+                    <button className="btn ghost" onClick={handleResetGame}>
                       Reset game
                     </button>
                   </div>
@@ -708,10 +784,10 @@ function App() {
               <div className="scoring-section">
                 <div className="section-label">Tossups</div>
                 <div className="action-row">
-                  <button className="btn primary wide" onClick={() => awardTossup("A")} disabled={!isAdmin}>
+                  <button className="btn primary wide" onClick={() => awardTossup("A")}>
                     Tossup +10 → {game?.teamAName || "Team A"}
                   </button>
-                  <button className="btn primary wide" onClick={() => awardTossup("B")} disabled={!isAdmin}>
+                  <button className="btn primary wide" onClick={() => awardTossup("B")}>
                     Tossup +10 → {game?.teamBName || "Team B"}
                   </button>
                 </div>
