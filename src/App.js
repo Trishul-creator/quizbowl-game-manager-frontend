@@ -96,12 +96,202 @@ function App() {
     fetchBracket();
   }, [fetchGame, fetchBracket, gameId]);
 
-  useInterval(() => {
-    if (isAdmin) {
-      fetchGame();
-      fetchBracket();
+  // Polling replaced by centralized, leader-based poller that reduces load across tabs.
+  // Behavior:
+  // - One tab becomes the "leader" (via localStorage heartbeat) and performs polling.
+  // - Leader polls `/api/game` and `/api/bracket` using conditional ETag requests (If-None-Match) when possible.
+  // - Leader broadcasts updates via BroadcastChannel and localStorage so other tabs receive updates without polling.
+  // - Visibility API is respected: polls stop while tab is hidden.
+  // - Exponential backoff with jitter is used on errors.
+  useEffect(() => {
+    let stopped = false;
+    let leader = false;
+    const myId = Math.random().toString(36).slice(2);
+    let heartbeatInterval = null;
+    let pollTimeout = null;
+    let retry = 0;
+    const bc = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("quizbowl-channel") : null;
+
+    const ETAG_GAME_KEY = "quizbowl:etag:game";
+    const ETAG_BRACKET_KEY = "quizbowl:etag:bracket";
+
+    const notifyUpdate = (payload) => {
+      try {
+        if (bc) bc.postMessage({ type: "update", payload });
+        localStorage.setItem("quizbowl:lastUpdate", JSON.stringify({ payload, ts: Date.now() }));
+      } catch (err) {
+        // storage may fail in some contexts; ignore
+      }
+    };
+
+    const onBcMessage = (ev) => {
+      const data = ev?.data;
+      if (!data) return;
+      if (data.type === "heartbeat" && data.id !== myId) {
+        // presence of another heartbeat => relinquish leadership
+        leader = false;
+      } else if (data.type === "update") {
+        const p = data.payload || {};
+        if (p.game) setGame(p.game);
+        if (p.bracket) setBracket(p.bracket);
+      }
+    };
+
+    if (bc) bc.onmessage = onBcMessage;
+
+    const attemptToBecomeLeader = () => {
+      try {
+        const raw = localStorage.getItem("quizbowl:heartbeat");
+        const now = Date.now();
+        const hb = raw ? JSON.parse(raw) : null;
+        if (!hb || now - (hb.ts || 0) > 7000) {
+          localStorage.setItem("quizbowl:heartbeat", JSON.stringify({ id: myId, ts: now }));
+          leader = true;
+        } else {
+          leader = hb.id === myId;
+        }
+      } catch (err) {
+        // ignore
+      }
+    };
+
+    heartbeatInterval = setInterval(() => {
+      if (leader) {
+        try {
+          const now = Date.now();
+          localStorage.setItem("quizbowl:heartbeat", JSON.stringify({ id: myId, ts: now }));
+          if (bc) bc.postMessage({ type: "heartbeat", id: myId, ts: now });
+        } catch (err) {
+          // ignore
+        }
+      } else {
+        attemptToBecomeLeader();
+      }
+    }, 2500);
+
+    attemptToBecomeLeader();
+
+    const scheduleNext = (ms) => {
+      if (stopped) return;
+      if (pollTimeout) clearTimeout(pollTimeout);
+      pollTimeout = setTimeout(pollOnce, ms || 1000);
+    };
+
+    async function pollOnce() {
+      if (stopped) return;
+      if (!leader) {
+        // not leader; wait and try again later
+        scheduleNext(3000 + Math.random() * 2000);
+        return;
+      }
+      if (document.hidden) {
+        // when hidden, poll less frequently
+        scheduleNext(10000 + Math.random() * 5000);
+        return;
+      }
+
+      const baseInterval = isAdmin ? 5000 : 15000; // reduced load for viewers, reasonable interval for admins
+      let waitForNext = baseInterval + Math.random() * 2000;
+
+      try {
+        // Game fetch with conditional ETag
+        const gameEtag = localStorage.getItem(ETAG_GAME_KEY) || undefined;
+        const gameRes = await api.get("/api/game", {
+          params: { gameId },
+          headers: gameEtag ? { "If-None-Match": gameEtag } : {},
+          validateStatus: (s) => s === 200 || s === 304 || (s >= 200 && s < 300),
+        });
+        if (gameRes.status === 200) {
+          if (isAdmin || !game) {
+            setGame(gameRes.data);
+            if (!editingNames) {
+              setTeamAInput(gameRes.data.teamAName);
+              setTeamBInput(gameRes.data.teamBName);
+            }
+          }
+          const newEtag = (gameRes.headers && (gameRes.headers.etag || gameRes.headers.ETag)) || undefined;
+          if (newEtag) localStorage.setItem(ETAG_GAME_KEY, newEtag);
+        }
+
+        // Bracket fetch with conditional ETag
+        const bracketEtag = localStorage.getItem(ETAG_BRACKET_KEY) || undefined;
+        const bracketRes = await api.get("/api/bracket", {
+          headers: bracketEtag ? { "If-None-Match": bracketEtag } : {},
+          validateStatus: (s) => s === 200 || s === 304 || (s >= 200 && s < 300),
+        });
+        if (bracketRes.status === 200) {
+          setBracket(bracketRes.data);
+          const newEtag = (bracketRes.headers && (bracketRes.headers.etag || bracketRes.headers.ETag)) || undefined;
+          if (newEtag) localStorage.setItem(ETAG_BRACKET_KEY, newEtag);
+        }
+
+        // broadcast if there are updates; on 304 we send undefined which consumers ignore
+        notifyUpdate({
+          game: (gameRes && gameRes.status === 200) ? gameRes.data : undefined,
+          bracket: (bracketRes && bracketRes.status === 200) ? bracketRes.data : undefined,
+        });
+
+        // success
+        retry = 0;
+      } catch (err) {
+        // err may be network or server - escalate backoff
+        retry++;
+        waitForNext = Math.min(60000, (2 ** retry) * 1000 + Math.random() * 1000);
+      } finally {
+        scheduleNext(waitForNext);
+      }
     }
-  }, isAdmin ? 1200 : 5000);
+
+    // visibility: if coming back visible, try an immediate poll
+    const onVis = () => {
+      if (!document.hidden && leader) {
+        pollOnce();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    // storage listener allows tabs without BroadcastChannel to receive updates and to observe heartbeats
+    const onStorage = (ev) => {
+      if (ev.key === "quizbowl:lastUpdate" && ev.newValue) {
+        try {
+          const parsed = JSON.parse(ev.newValue);
+          const p = parsed.payload || {};
+          if (p.game) setGame(p.game);
+          if (p.bracket) setBracket(p.bracket);
+        } catch (err) {
+          // ignore
+        }
+      } else if (ev.key === "quizbowl:heartbeat" && ev.newValue) {
+        try {
+          const hb = JSON.parse(ev.newValue);
+          if (hb.id !== myId) {
+            leader = false;
+          }
+        } catch (err) {
+          // ignore
+        }
+      }
+    };
+    window.addEventListener("storage", onStorage);
+
+    // also listen on BroadcastChannel for updates
+    if (bc) bc.onmessage = onBcMessage;
+
+    // start polling cycle
+    pollOnce();
+
+    return () => {
+      stopped = true;
+      leader = false;
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      if (pollTimeout) clearTimeout(pollTimeout);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("storage", onStorage);
+      if (bc) {
+        try { bc.close(); } catch (err) { /* ignore */ }
+      }
+    };
+  }, [isAdmin, gameId, editingNames]);
 
   useEffect(() => {
     const source = new EventSource("https://api.quizbowl.game-manager.org/api/bracket/stream");
