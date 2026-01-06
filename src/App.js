@@ -3,7 +3,7 @@ import axios from "axios";
 import "./App.css";
 
 const api = axios.create({
-  baseURL: "https://api.quizbowl.game-manager.org",
+  baseURL: "http://localhost:8080",
 });
 
 function useInterval(callback, delay) {
@@ -96,11 +96,44 @@ function App() {
     fetchBracket();
   }, [fetchGame, fetchBracket, gameId]);
 
-  useInterval(() => {
-    fetchGame();
-    fetchBracket();
-  }, 1200);
-  //Random Change for fun.
+  // Set up real-time streaming
+  useEffect(() => {
+    const gameEventSource = new EventSource(`${api.defaults.baseURL}/api/game/stream?gameId=${gameId}`);
+    const bracketEventSource = new EventSource(`${api.defaults.baseURL}/api/bracket/stream`);
+
+    gameEventSource.onmessage = (event) => {
+      if (event.data) {
+        try {
+          const data = JSON.parse(event.data);
+          if (isAdmin || !game) {
+            setGame(data);
+            if (!editingNames) {
+              setTeamAInput(data.teamAName);
+              setTeamBInput(data.teamBName);
+            }
+          }
+        } catch (err) {
+          // ignore parse errors
+        }
+      }
+    };
+
+    bracketEventSource.onmessage = (event) => {
+      if (event.data) {
+        try {
+          const data = JSON.parse(event.data);
+          setBracket(data);
+        } catch (err) {
+          // ignore parse errors
+        }
+      }
+    };
+
+    return () => {
+      gameEventSource.close();
+      bracketEventSource.close();
+    };
+  }, [gameId, isAdmin, game, editingNames]);
 
   useInterval(() => {
     setTimerSeconds((prev) => {
